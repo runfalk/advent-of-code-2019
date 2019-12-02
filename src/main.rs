@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use aoc_2019::day1;
+use aoc_2019::{day1, day2};
 
 fn as_result<A: ToString, B: ToString>(value: (A, Option<B>)) -> (String, Option<String>) {
     (value.0.to_string(), value.1.map(|x| x.to_string()))
@@ -13,7 +13,8 @@ fn main() -> Result<()> {
     }
 
     let result = match args[1].parse()? {
-        1u8 => as_result(day1::main(&args[2..])?),
+        1 => as_result(day1::main(&args[2..])?),
+        2 => as_result(day2::main(&args[2..])?),
         1..=25 => return Err(anyhow!("No implementation for this day yet")),
         day => return Err(anyhow!("Day {} is not a valid day for advent of code", day)),
     };
