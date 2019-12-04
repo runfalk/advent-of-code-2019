@@ -143,18 +143,16 @@ impl Iterator for PathIterator {
             return None;
         }
 
-        let output = if self.i < self.path.dirs[self.curr_dir].len() {
+        let dir = self.path.dirs[self.curr_dir];
+        let output = if self.i < dir.len() {
             self.i += 1;
-            Some(
-                self.origin
-                    .offset(self.path.dirs[self.curr_dir].resize(self.i)),
-            )
+            Some(self.origin.offset(dir.resize(self.i)))
         } else {
             None
         };
 
-        if self.i == self.path.dirs[self.curr_dir].len() {
-            self.origin = self.origin.offset(self.path.dirs[self.curr_dir]);
+        if self.i == dir.len() {
+            self.origin = self.origin.offset(dir);
             self.curr_dir += 1;
             self.i = 0;
         }
