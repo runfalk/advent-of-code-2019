@@ -14,7 +14,10 @@ struct ParentIterator<'a> {
 
 impl<'a> ParentIterator<'a> {
     pub fn new(orbits: &'a Orbits, start: &'a str) -> Self {
-        Self { orbits, curr: start }
+        Self {
+            orbits,
+            curr: start,
+        }
     }
 }
 
@@ -61,7 +64,9 @@ pub fn main(args: &[String]) -> Result<(usize, Option<usize>)> {
             let mut mass_iter = orbit_str.split(")");
 
             let mass = mass_iter.next().unwrap();
-            let satellite = mass_iter.next().ok_or(anyhow!("No orbit separator found"))?;
+            let satellite = mass_iter
+                .next()
+                .ok_or(anyhow!("No orbit separator found"))?;
             Ok((satellite.into(), mass.into()))
         })
         .collect::<StdResult<Orbits, _>>()?;
@@ -71,5 +76,8 @@ pub fn main(args: &[String]) -> Result<(usize, Option<usize>)> {
         .map(|planet| ParentIterator::new(&orbits, planet.as_str()).count())
         .sum();
 
-    Ok((total_num_orbits, Some(find_min_num_transfers(&orbits, "YOU", "SAN")?)))
+    Ok((
+        total_num_orbits,
+        Some(find_min_num_transfers(&orbits, "YOU", "SAN")?),
+    ))
 }

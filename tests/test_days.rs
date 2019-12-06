@@ -41,7 +41,6 @@ fn test_day5() {
     );
 }
 
-
 #[test]
 fn test_day6() -> Result<()> {
     assert_eq!(

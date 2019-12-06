@@ -82,12 +82,16 @@ impl<T: Iterator<Item = isize>> State<T> {
             .clone())
     }
 
-    fn read(&mut self, by_val: bool) -> Result<isize> {
-        let value = if by_val {
-            self.get(self.pc)?
+    fn peek(&self, by_val: bool) -> Result<isize> {
+        if by_val {
+            self.get(self.pc)
         } else {
-            self.get(self.get(self.pc)?.try_into()?)?
-        };
+            self.get(self.get(self.pc)?.try_into()?)
+        }
+    }
+
+    fn read(&mut self, by_val: bool) -> Result<isize> {
+        let value = self.peek(by_val)?;
         self.pc += 1;
         Ok(value)
     }
@@ -129,14 +133,14 @@ fn get_binop_params<T: Iterator<Item = isize>>(
     Ok((a, b, output.try_into()?))
 }
 
-fn add<T: Iterator<Item = isize>>(mut state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(&mut state, &op)?;
+fn add<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
+    let (a, b, output) = get_binop_params(state, &op)?;
     state.write(output, a + b)?;
     Ok(())
 }
 
-fn mul<T: Iterator<Item = isize>>(mut state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(&mut state, &op)?;
+fn mul<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
+    let (a, b, output) = get_binop_params(state, &op)?;
     state.write(output, a * b)?;
     Ok(())
 }
@@ -171,8 +175,8 @@ fn jmp<T: Iterator<Item = isize>>(
     Ok(())
 }
 
-fn lt<T: Iterator<Item = isize>>(mut state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(&mut state, &op)?;
+fn lt<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
+    let (a, b, output) = get_binop_params(state, &op)?;
     if a < b {
         state.write(output, 1)?;
     } else {
@@ -181,8 +185,8 @@ fn lt<T: Iterator<Item = isize>>(mut state: &mut State<T>, op: Opcode) -> Result
     Ok(())
 }
 
-fn eq<T: Iterator<Item = isize>>(mut state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(&mut state, &op)?;
+fn eq<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
+    let (a, b, output) = get_binop_params(state, &op)?;
     if a == b {
         state.write(output, 1)?;
     } else {
