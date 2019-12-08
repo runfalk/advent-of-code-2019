@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use std::convert::TryFrom;
 use std::convert::TryInto;
 use std::fs::read_to_string;
 use std::result::Result as StdResult;
@@ -16,6 +17,56 @@ struct State<T: Iterator<Item = isize>> {
     pc: usize,
     input: T,
     output: Vec<isize>,
+}
+
+/// Helper macro to extract individual parameters. Used inside get_params!(...)
+macro_rules! _fetch_param {
+    ($state:expr, $param_modes:expr, input) => {{
+        // Input parameters respect parameter modes
+        let is_by_val = $param_modes.next().unwrap();
+        $state.read(is_by_val)
+    }};
+    ($state:expr, $param_modes:expr, output) => {{
+        // Output parameters are always returned by value since the index we use the value as
+        // index when writing to memory
+        let is_by_val = $param_modes.next().unwrap();
+
+        if is_by_val {
+            Err(anyhow!("Output parameter must not be in immediate mode"))
+        } else {
+            let out: Result<usize> = match $state.read(true) {
+                Ok(pos) => Ok(usize::try_from(pos)?).into(),
+                e => e.map(|_| 0).into(),
+            };
+            out
+        }
+    }};
+}
+
+/// Helper macro to extract parameters for instructions
+///
+/// # Example usage
+/// Extract two input arguments for a binary operation and a target location:
+///
+/// ```
+/// let (a, b, output) = get_params(&mut state, &op, input, input, output)?;
+/// ```
+macro_rules! get_params {
+    ($state:expr, $op:expr, $($mode:ident),+) => {
+        {
+            let get_params = |state: &mut State<_>, op: &Opcode| -> Result<_> {
+                let mut param_mode_iter = op.param_modes();
+
+                // Unused parens happens when there is only one parameter
+                #[allow(unused_parens)]
+                Ok((
+                    $(_fetch_param!(state, param_mode_iter, $mode)?),+
+                ))
+            };
+
+            get_params($state, $op)
+        }
+    };
 }
 
 impl Iterator for DigitIterator {
@@ -120,40 +171,27 @@ impl<T: Iterator<Item = isize>> State<T> {
     }
 }
 
-fn get_binop_params<T: Iterator<Item = isize>>(
-    state: &mut State<T>,
-    op: &Opcode,
-) -> Result<(isize, isize, usize)> {
-    let mut param_iter = op.param_modes().map(|by_val| state.read(by_val));
-
-    let a = param_iter.next().unwrap()?;
-    let b = param_iter.next().unwrap()?;
-    let output = state.read_by_val()?;
-
-    Ok((a, b, output.try_into()?))
-}
-
 fn add<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(state, &op)?;
+    let (a, b, output) = get_params!(state, &op, input, input, output)?;
     state.write(output, a + b)?;
     Ok(())
 }
 
 fn mul<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(state, &op)?;
+    let (a, b, output) = get_params!(state, &op, input, input, output)?;
     state.write(output, a * b)?;
     Ok(())
 }
 
-fn io_in<T: Iterator<Item = isize>>(state: &mut State<T>, _op: Opcode) -> Result<()> {
-    let pos = state.read_by_val()?.try_into()?;
+fn io_in<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
+    let pos = get_params!(state, &op, output)?;
     let input = state.get_input()?;
     state.write(pos, input)?;
     Ok(())
 }
 
 fn io_out<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
-    let value = state.read(op.param_modes().next().unwrap())?;
+    let value = get_params!(state, &op, input)?;
     state.output(value);
     Ok(())
 }
@@ -163,11 +201,7 @@ fn jmp<T: Iterator<Item = isize>>(
     op: Opcode,
     jmp_if_true: bool,
 ) -> Result<()> {
-    let mut param_iter = op.param_modes().map(|by_val| state.read(by_val));
-
-    let cmp = param_iter.next().unwrap()?;
-    let jmp_target = param_iter.next().unwrap()?;
-
+    let (cmp, jmp_target) = get_params!(state, &op, input, input)?;
     if (cmp != 0) == jmp_if_true {
         state.set_pc(jmp_target.try_into()?)?;
     }
@@ -176,7 +210,7 @@ fn jmp<T: Iterator<Item = isize>>(
 }
 
 fn lt<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(state, &op)?;
+    let (a, b, output) = get_params!(state, &op, input, input, output)?;
     if a < b {
         state.write(output, 1)?;
     } else {
@@ -186,7 +220,7 @@ fn lt<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()>
 }
 
 fn eq<T: Iterator<Item = isize>>(state: &mut State<T>, op: Opcode) -> Result<()> {
-    let (a, b, output) = get_binop_params(state, &op)?;
+    let (a, b, output) = get_params!(state, &op, input, input, output)?;
     if a == b {
         state.write(output, 1)?;
     } else {
