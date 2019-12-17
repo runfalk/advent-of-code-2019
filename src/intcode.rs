@@ -1,196 +1,229 @@
 use anyhow::{anyhow, Result};
-use std::collections::{vec_deque::Drain, VecDeque};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fs::read_to_string;
 use std::path::Path;
 
-pub struct DigitIterator {
-    inner: isize,
+#[derive(Debug)]
+pub enum Mode {
+    Pos,
+    Immediate,
+    Relative,
 }
 
+#[derive(Debug)]
+pub enum State {
+    Input(PausedInterpreterInput),
+    Output(PausedInterpreterOutput),
+    Halt,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Opcode {
-    inner: isize,
+    inner: usize,
 }
 
-pub struct State {
-    memory: Vec<isize>,
+#[derive(Clone, Debug)]
+pub struct Interpreter {
+    memory: HashMap<usize, isize>,
     pc: usize,
-    input: VecDeque<isize>,
-    output: VecDeque<isize>,
+    rel_base: isize,
 }
 
-pub fn intcode_from_path<P: AsRef<Path>>(path: P) -> Result<Vec<isize>> {
-    let str_input = read_to_string(path)?;
-    let program = str_input
-        .trim_end()
-        .split(",")
-        .map(|x| x.parse())
-        .collect::<Result<Vec<isize>, _>>()?;
-
-    if program.len() == 0 {
-        return Err(anyhow!(
-            "Program is too short (expected at least 1 element, got 0)"
-        ));
-    }
-
-    Ok(program)
+#[derive(Clone, Debug)]
+pub struct PausedInterpreterInput {
+    inner: Interpreter,
+    pos: usize,
 }
 
-/// Helper macro to extract parameters for instructions
-#[macro_export]
-macro_rules! get_params {
-    ($state:expr, $param_modes:expr, fetch_param, input) => {
-        {
-            // Input parameters respect parameter modes
-            let is_by_val = $param_modes.next().unwrap();
-            $state.read(is_by_val)
-        }
-    };
-    ($state:expr, $param_modes:expr, fetch_param, output) => {
-        {
-            // Output parameters are always returned by value since the index we use the value as
-            // index when writing to memory
-            let is_by_val = $param_modes.next().unwrap();
-
-            if is_by_val {
-                Err(anyhow!("Output parameter must not be in immediate mode"))
-            } else {
-                use std::convert::TryFrom;
-                let out: Result<usize> = match $state.read(true) {
-                    Ok(pos) => Ok(usize::try_from(pos)?).into(),
-                    e => e.map(|_| 0).into(),
-                };
-                out
-            }
-        }
-    };
-    ($state:expr, $op:expr, $($mode:ident),+) => {
-        {
-            let get_params = |state: &mut State, op: &Opcode| -> Result<_> {
-                let mut param_mode_iter = op.param_modes();
-
-                // Unused parens happens when there is only one parameter
-                #[allow(unused_parens)]
-                Ok((
-                    $(get_params!(state, param_mode_iter, fetch_param, $mode)?),+
-                ))
-            };
-
-            get_params($state, $op)
-        }
-    };
-}
-
-impl Iterator for DigitIterator {
-    type Item = isize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        // Technically this doesn't yield anything if the digits start at 0. This is however
-        // exactly what we want for parameter modes
-        if self.inner == 0 {
-            return None;
-        }
-
-        let value = self.inner % 10;
-        self.inner /= 10;
-        Some(value)
-    }
+#[derive(Clone, Debug)]
+pub struct PausedInterpreterOutput {
+    inner: Interpreter,
+    value: isize,
 }
 
 impl Opcode {
-    pub fn new(inner: isize) -> Self {
+    pub fn new(inner: usize) -> Self {
         Self { inner }
     }
 
-    pub fn code(&self) -> isize {
+    pub fn code(&self) -> usize {
         self.inner % 100
     }
 
-    pub fn param_modes(&self) -> impl Iterator<Item = bool> {
-        let digits = DigitIterator {
-            inner: self.inner / 100,
-        };
-        digits.map(|x| x != 0).chain(std::iter::repeat(false))
+    pub fn param_mode(&self, i: u32) -> Result<Mode> {
+        match (self.inner / 10usize.pow(i + 2)) % 10 {
+            0 => Ok(Mode::Pos),
+            1 => Ok(Mode::Immediate),
+            2 => Ok(Mode::Relative),
+            mode => Err(anyhow!(
+                "Invalid parameter mode {} for parameter {}",
+                mode,
+                i
+            )),
+        }
     }
 }
 
-impl State {
-    pub fn new(memory: Vec<isize>) -> Self {
+impl Interpreter {
+    pub fn new(memory: HashMap<usize, isize>) -> Self {
         Self {
             memory,
             pc: 0,
-            input: VecDeque::default(),
-            output: VecDeque::default(),
+            rel_base: 0,
         }
     }
 
-    pub fn set_pc(&mut self, i: usize) -> Result<usize> {
-        if i >= self.memory.len() {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let str_input = read_to_string(path)?;
+        let program = str_input
+            .trim_end()
+            .split(",")
+            .enumerate()
+            .map(|(i, x)| -> Result<(usize, isize)> { Ok((i, x.parse()?)) })
+            .collect::<Result<HashMap<usize, isize>, _>>()?;
+
+        if program.len() == 0 {
             return Err(anyhow!(
-                "Tried to set program counter outside of the program"
+                "Program is too short (expected at least 1 element, got 0)"
             ));
         }
-        self.pc = i;
-        Ok(i)
+
+        Ok(Self::new(program))
     }
 
-    pub fn get(&self, i: usize) -> Result<isize> {
-        Ok(self
-            .memory
-            .get(i)
-            .ok_or(anyhow!(
-                "Tried to read instruction beyond the end of the memory ({})",
-                i
-            ))?
-            .clone())
+    pub fn get(&self, i: usize) -> isize {
+        self.memory.get(&i).unwrap_or(&0).clone()
     }
 
-    pub fn peek(&self, by_val: bool) -> Result<isize> {
-        if by_val {
-            self.get(self.pc)
-        } else {
-            self.get(self.get(self.pc)?.try_into()?)
-        }
+    pub fn put(&mut self, pos: usize, value: isize) {
+        *self.memory.entry(pos).or_insert(0) = value;
     }
 
-    pub fn read(&mut self, by_val: bool) -> Result<isize> {
-        let value = self.peek(by_val)?;
+    pub fn read_opcode(&mut self) -> Result<Opcode> {
+        Ok(Opcode::new(
+            self.read_input_param(Mode::Immediate)?.try_into()?,
+        ))
+    }
+
+    pub fn read_input_param(&mut self, mode: Mode) -> Result<isize> {
+        let value = match mode {
+            Mode::Pos => self.get(self.get(self.pc).try_into()?),
+            Mode::Immediate => self.get(self.pc),
+            Mode::Relative => self.get((self.rel_base + self.get(self.pc)).try_into()?),
+        };
         self.pc += 1;
         Ok(value)
     }
 
-    pub fn read_by_val(&mut self) -> Result<isize> {
-        self.read(true)
+    pub fn read_output_param(&mut self, mode: Mode) -> Result<usize> {
+        let value = match mode {
+            Mode::Pos => self.get(self.pc),
+            Mode::Immediate => {
+                return Err(anyhow!("Output parameter must not be in immediate mode"))
+            }
+            Mode::Relative => self.get((self.rel_base + self.get(self.pc)).try_into()?),
+        };
+        self.pc += 1;
+        Ok(value.try_into()?)
     }
 
-    pub fn write(&mut self, pos: usize, value: isize) -> Result<isize> {
-        let item = self
-            .memory
-            .get_mut(pos)
-            .ok_or(anyhow!("Tried to write instruction outside of memory"))?;
-        *item = value;
-        Ok(value)
+    fn read_binop_params(&mut self, op: Opcode) -> Result<(isize, isize, usize)> {
+        Ok((
+            self.read_input_param(op.param_mode(0)?)?,
+            self.read_input_param(op.param_mode(1)?)?,
+            self.read_output_param(op.param_mode(2)?)?,
+        ))
     }
 
-    pub fn pop_input(&mut self) -> Result<isize> {
-        self.input
-            .pop_front()
-            .ok_or(anyhow!("Tried to get input but it's empty"))
+    pub fn add(&mut self, op: Opcode) -> Result<()> {
+        let (a, b, output) = self.read_binop_params(op)?;
+        self.put(output, a + b);
+        Ok(())
     }
 
-    pub fn push_input(&mut self, value: isize) {
-        self.input.push_back(value);
+    pub fn mul(&mut self, op: Opcode) -> Result<()> {
+        let (a, b, output) = self.read_binop_params(op)?;
+        self.put(output, a * b);
+        Ok(())
     }
 
-    pub fn extend_input<T: IntoIterator<Item = isize>>(&mut self, it: T) {
-        self.input.extend(it);
+    pub fn jmp(&mut self, op: Opcode) -> Result<()> {
+        let cmp = self.read_input_param(op.param_mode(0)?)?;
+        let jmp_target = self.read_input_param(op.param_mode(1)?)?;
+        if (cmp != 0) == (op.code() == 5) {
+            self.pc = jmp_target.try_into()?;
+        }
+
+        Ok(())
     }
 
-    pub fn push_output(&mut self, value: isize) {
-        self.output.push_back(value);
+    pub fn lt(&mut self, op: Opcode) -> Result<()> {
+        let (a, b, output) = self.read_binop_params(op)?;
+        if a < b {
+            self.put(output, 1);
+        } else {
+            self.put(output, 0);
+        }
+        Ok(())
     }
 
-    pub fn drain_output(&mut self) -> Drain<isize> {
-        self.output.drain(..)
+    pub fn eq(&mut self, op: Opcode) -> Result<()> {
+        let (a, b, output) = self.read_binop_params(op)?;
+        if a == b {
+            self.put(output, 1);
+        } else {
+            self.put(output, 0);
+        }
+        Ok(())
+    }
+
+    pub fn set_rel_base(&mut self, op: Opcode) -> Result<()> {
+        self.rel_base += self.read_input_param(op.param_mode(0)?)?;
+        Ok(())
+    }
+
+    pub fn run(mut self) -> Result<State> {
+        loop {
+            let op = self.read_opcode()?;
+            match op.code() {
+                1 => self.add(op)?,
+                2 => self.mul(op)?,
+                3 => {
+                    let pos = self.read_output_param(op.param_mode(0)?)?;
+                    return Ok(State::Input(PausedInterpreterInput { inner: self, pos }));
+                }
+                4 => {
+                    let value = self.read_input_param(op.param_mode(0)?)?;
+                    return Ok(State::Output(PausedInterpreterOutput {
+                        inner: self,
+                        value,
+                    }));
+                }
+                5 | 6 => self.jmp(op)?,
+                7 => self.lt(op)?,
+                8 => self.eq(op)?,
+                9 => self.set_rel_base(op)?,
+                99 => return Ok(State::Halt),
+                op => return Err(anyhow!("Got invalid opcode {}", op)),
+            }
+        }
+    }
+}
+
+impl PausedInterpreterInput {
+    pub fn resume(mut self, value: isize) -> Result<State> {
+        self.inner.put(self.pos, value);
+        self.inner.run()
+    }
+}
+
+impl PausedInterpreterOutput {
+    pub fn get(&self) -> isize {
+        self.value
+    }
+
+    pub fn resume(self) -> Result<State> {
+        self.inner.run()
     }
 }
