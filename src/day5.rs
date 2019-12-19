@@ -19,7 +19,7 @@ pub fn compute(computer: Interpreter, value: isize) -> Result<isize> {
                 output = Some(c.get());
                 state = c.resume()?;
             }
-            State::Halt => break,
+            State::Halt(_) => break,
         }
     }
     Ok(output.ok_or(anyhow!("No output produced by computer"))?)
