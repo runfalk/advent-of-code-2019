@@ -1,5 +1,5 @@
 use anyhow::Result;
-use aoc_2019::{day1, day2, day3, day4, day5, day6, day8};
+use aoc_2019::{day1, day2, day3, day4, day5, day6, day8, day9};
 
 #[test]
 fn test_day1() {
@@ -70,4 +70,12 @@ fn test_day8() -> Result<()> {
         )
     );
     Ok(())
+}
+
+#[test]
+fn test_day9() {
+    assert_eq!(
+        day9::main(&["data/day9.txt".to_owned()]).unwrap(),
+        (3100786347, Some(87023))
+    );
 }

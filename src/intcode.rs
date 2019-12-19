@@ -126,7 +126,7 @@ impl Interpreter {
             Mode::Immediate => {
                 return Err(anyhow!("Output parameter must not be in immediate mode"))
             }
-            Mode::Relative => self.get((self.rel_base + self.get(self.pc)).try_into()?),
+            Mode::Relative => self.rel_base + self.get(self.pc),
         };
         self.pc += 1;
         Ok(value.try_into()?)

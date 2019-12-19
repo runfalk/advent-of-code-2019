@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use aoc_2019::{day1, day2, day3, day4, day5, day6, day8};
+use aoc_2019::{day1, day2, day3, day4, day5, day6, day8, day9};
 
 fn pad_newlines(answer: String) -> String {
     answer.lines().collect::<Vec<_>>().join("\n   ")
@@ -27,6 +27,7 @@ fn main() -> Result<()> {
         5 => as_result(day5::main(&args[2..])?),
         6 => as_result(day6::main(&args[2..])?),
         8 => as_result(day8::main(&args[2..])?),
+        9 => as_result(day9::main(&args[2..])?),
         1..=25 => return Err(anyhow!("No implementation for this day yet")),
         day => return Err(anyhow!("Day {} is not a valid day for advent of code", day)),
     };
